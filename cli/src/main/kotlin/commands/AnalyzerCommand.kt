@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2020 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +23,7 @@ package org.ossreviewtoolkit.commands
 import com.github.ajalt.clikt.core.BadParameterValue
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.core.requireObject
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.associate
 import com.github.ajalt.clikt.parameters.options.convert
@@ -40,8 +42,10 @@ import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.analyzer.curation.ClearlyDefinedPackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.FallbackPackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.FilePackageCurationProvider
+import org.ossreviewtoolkit.analyzer.curation.Sw360PackageCurationProvider
 import org.ossreviewtoolkit.model.FileFormat
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
+import org.ossreviewtoolkit.model.config.OrtConfiguration
 import org.ossreviewtoolkit.model.mapper
 import org.ossreviewtoolkit.model.utils.mergeLabels
 import org.ossreviewtoolkit.utils.expandTilde
@@ -100,6 +104,11 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         help = "Whether to fall back to package curation data from the ClearlyDefine service or not."
     ).flag()
 
+    private val useSw360Curations by option(
+        "--sw360-curations",
+        help = "Whether to fall back to package curation data from the SW360 service or not."
+    ).flag()
+
     private val repositoryConfigurationFile by option(
         "--repository-configuration-file",
         help = "A file containing the repository configuration. If set the .ort.yml file from the repository will be " +
@@ -111,6 +120,8 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         "--label", "-l",
         help = "Add a label to the ORT result. Can be used multiple times. For example: --label distribution=external"
     ).associate()
+
+    private val config by requireObject<OrtConfiguration>()
 
     override fun run() {
         val absoluteOutputDir = outputDir.normalize()
@@ -132,7 +143,11 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         val absoluteInputDir = inputDir.normalize()
         println("Analyzing project path:\n\t$absoluteInputDir")
 
-        val analyzerConfig = AnalyzerConfiguration(ignoreToolVersions, allowDynamicVersions)
+        val analyzerConfig = AnalyzerConfiguration(
+            ignoreToolVersions,
+            allowDynamicVersions,
+            config.analyzer?.sw360Configuration
+        )
         val analyzer = Analyzer(analyzerConfig)
 
         val globalPackageCurationsFile = ortDataDirectory.resolve("config/curations.yml")
@@ -140,7 +155,10 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
             listOfNotNull(
                 packageCurationsFile?.let { FilePackageCurationProvider(it) },
                 globalPackageCurationsFile.takeIf { it.isFile }?.let { FilePackageCurationProvider(it) },
-                ClearlyDefinedPackageCurationProvider().takeIf { useClearlyDefinedCurations }
+                ClearlyDefinedPackageCurationProvider().takeIf { useClearlyDefinedCurations },
+                config.analyzer?.sw360Configuration?.let {
+                    Sw360PackageCurationProvider(config.analyzer?.sw360Configuration).takeIf { useSw360Curations }
+                }
             )
         )
 
